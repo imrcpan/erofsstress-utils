@@ -5,10 +5,16 @@
  * Copyright (C) 2019-2025 Gao Xiang <xiang@kernel.org>
  */
 #define _FILE_OFFSET_BITS 64
+#ifndef __FreeBSD__
 #define _GNU_SOURCE
-#include "erofs/defs.h"
+#endif
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#endif
 #include <errno.h>
+#ifndef __FreeBSD__
 #include <sched.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +24,27 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <limits.h>
+
+/* Provide ARRAY_SIZE if not available */
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+
+/* erofs/defs.h compatibility - define what we need if not available */
+#ifndef __has_include
+#define __has_include(x) 0
+#endif
+
+#if !__has_include("erofs/defs.h")
+/* Define what we need from erofs/defs.h if it's not available */
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+#endif
 
 #define MAX_CHUNKSIZE		(2 * 1024 * 1024)
 #define MAX_SCAN_CHUNKSIZE	(256 * 1024)
@@ -71,6 +98,11 @@ static int drop_caches_f(int op, unsigned int sn)
 	if (!procfile[mode])
 		return -EINVAL;
 
+#ifdef __FreeBSD__
+	printf("%d[%u]/%u %s: drop_caches not supported on FreeBSD, skipping\n",
+	       getpid(), procid, sn, __func__);
+	return 0;
+#else
 	printf("%d[%u]/%u %s: %s=%s", getpid(), procid, sn, __func__,
 	       procfile[mode], val[mode]);
 
@@ -81,10 +113,16 @@ static int drop_caches_f(int op, unsigned int sn)
 	start = clock();
 	while (clock() < start + CLOCKS_PER_SEC) {
 		fputs(val[mode], f);
+#ifdef __FreeBSD__
+		struct timespec ts = {0, 1000};
+		nanosleep(&ts, NULL);
+#else
 		(void)sched_yield();
+#endif
 	}
 	fclose(f);
 	return 0;
+#endif
 }
 
 struct fent {
@@ -606,8 +644,14 @@ void randomdelay(void)
 	clock_t length = (lr % CLOCKS_PER_SEC) >> 1;
 
 	start = clock();
-	while (clock() < start + length)
+	while (clock() < start + length) {
+#ifdef __FreeBSD__
+		struct timespec ts = {0, 1000}; /* 1 microsecond */
+		nanosleep(&ts, NULL);
+#else
 		(void)sched_yield();
+#endif
+	}
 }
 
 void sg_handler(int signum)
